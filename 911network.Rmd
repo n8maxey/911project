@@ -1,0 +1,347 @@
+---
+title: "MFCC Feature Extraction from Audio Files"
+author: "Nathaniel Maxey"
+output: html_document
+---
+
+### Libraries and Setup
+```{r setup, include=FALSE}
+# Load necessary libraries
+library(tuneR)    # For reading audio files
+library(seewave)  # For audio feature extraction (e.g., MFCC)
+library(dplyr)    # For data manipulation
+
+# Set paths for audio files and metadata
+AUDIO_PATH <- "C:/Users/natem/OneDrive/Desktop/911 network/911_recordings"
+OUTPUT_PATH <- "C:/Users/natem/OneDrive/Desktop/911 network/911_recordings/wav_files"
+metadata_path <- "C:/Users/natem/OneDrive/Desktop/911 network/911_metadata.csv"
+
+# Create output directory if it doesn't exist
+if (!dir.exists(OUTPUT_PATH)) {
+  dir.create(OUTPUT_PATH)
+}
+```
+Convert MP3 Files to WAV
+```{r}
+# List all MP3 files in the directory
+mp3_files <- list.files(AUDIO_PATH, pattern = "\\.mp3$", full.names = TRUE)
+
+# Split into two parts: 1-238 and 239 to end
+# Part 1: Files 1-238
+for (i in 1:238) {
+  mp3_file <- mp3_files[i]
+  
+  tryCatch({
+    # Read the MP3 file
+    audio <- readMP3(mp3_file)
+    
+    # Create the output WAV file path
+    wav_file <- file.path(OUTPUT_PATH, paste0(tools::file_path_sans_ext(basename(mp3_file)), ".wav"))
+    
+    # Write the audio as a WAV file
+    writeWave(audio, wav_file)
+    
+    # Print the status
+    cat("Converted", mp3_file, "to", wav_file, "\n")
+  }, error = function(e) {
+    # Log the error and stop processing the current file
+    cat("Error processing file:", mp3_file, "\nError message:", e$message, "\n")
+  })
+}
+
+cat("Finished processing files 1 to 238.\n")
+
+# Part 2: Files 239 to end
+for (i in 239:length(mp3_files)) {
+  mp3_file <- mp3_files[i]
+  
+  tryCatch({
+    # Read the MP3 file
+    audio <- readMP3(mp3_file)
+    
+    # Create the output WAV file path
+    wav_file <- file.path(OUTPUT_PATH, paste0(tools::file_path_sans_ext(basename(mp3_file)), ".wav"))
+    
+    # Write the audio as a WAV file
+    writeWave(audio, wav_file)
+    
+    # Print the status
+    cat("Converted", mp3_file, "to", wav_file, "\n")
+  }, error = function(e) {
+    # Log the error and stop processing the current file
+    cat("Error processing file:", mp3_file, "\nError message:", e$message, "\n")
+  })
+}
+
+cat("Finished processing files 239 to end.\n")
+```
+count amount of wave files created and conver to mono
+```{r}
+library(tuneR)
+
+# Set paths
+AUDIO_PATH <- "C:/Users/natem/OneDrive/Desktop/911 network/911_recordings/wav_files"
+OUTPUT_PATH <- "C:/Users/natem/OneDrive/Desktop/911 network/911_recordings/processed_wav_files"
+metadata_path <- "C:/Users/natem/OneDrive/Desktop/911 network/911_metadata.csv"
+
+# Create output folder if it doesn't exist
+if (!dir.exists(OUTPUT_PATH)) dir.create(OUTPUT_PATH)
+
+# Load metadata CSV file
+metadata <- read.csv(metadata_path)
+
+# Clean and process metadata
+metadata$file_name <- trimws(metadata$file_name) # Remove leading/trailing spaces
+metadata <- metadata[metadata$file_name != "", ] # Remove empty rows
+metadata_base_names <- tools::file_path_sans_ext(metadata$file_name) # Remove extensions
+
+# List all WAV files in the directory
+wav_files <- list.files(AUDIO_PATH, pattern = "\\.wav$", full.names = TRUE)
+
+# Convert all WAV files to mono and save them to the output folder
+for (file in wav_files) {
+  # Read the WAV file
+  wave <- readWave(file)
+  
+  # Convert to mono if it's stereo
+  if (wave@stereo) {
+    wave <- mono(wave, which = "both") # Combine left and right channels
+  }
+  
+  # Save the mono file to the output folder
+  output_file <- file.path(OUTPUT_PATH, basename(file))
+  writeWave(wave, output_file)
+}
+
+# Verify the count of processed WAV files
+processed_wav_files <- list.files(OUTPUT_PATH, pattern = "\\.wav$", full.names = TRUE)
+num_processed_files <- length(processed_wav_files)
+cat("Number of processed (mono) WAV files:", num_processed_files, "\n")
+
+# Extract base names (without path and extension) from processed WAV files
+processed_base_names <- tools::file_path_sans_ext(basename(processed_wav_files))
+
+# Match metadata file names with processed WAV file names
+metadata$wav <- ifelse(metadata_base_names %in% processed_base_names,
+                       paste0(processed_base_names, ".wav"), NA)
+
+# Create matched data with only rows where a WAV file exists
+matched_data <- metadata[!is.na(metadata$wav), ]
+
+# Save the matched data as a CSV (optional)
+write.csv(matched_data, file = "C:/Users/natem/OneDrive/Desktop/911 network/matched_metadata.csv", row.names = FALSE)
+
+cat("Number of matched records:", nrow(matched_data), "\n")
+
+```
+Now extarct MCC features
+```{r}
+# Load required libraries
+library(tuneR)
+library(seewave)
+library(dplyr)
+
+# Paths
+AUDIO_PATH <- "C:/Users/natem/OneDrive/Desktop/911 network/911_recordings/wav_files"
+
+# Use matched_data$wav for processing
+wav_files <- file.path(AUDIO_PATH, matched_data$wav)
+
+# Initialize an empty list to store MFCC features
+mfcc_features_list <- list()
+
+# Extract MFCC features for each WAV file
+for (i in seq_along(wav_files)) {
+  wav_file <- wav_files[i]
+  
+  tryCatch({
+    # Read the WAV file
+    audio <- readWave(wav_file)
+    
+    # Extract MFCC features
+    mfcc <- melfcc(audio, numcep = 13, wintime = 0.025, hoptime = 0.01) # Adjust parameters as needed
+    
+    # Convert MFCC matrix to a single row
+    mfcc_row <- as.numeric(colMeans(mfcc)) # Aggregate MFCC features by column means (or customize aggregation)
+    
+    # Add the file name to the row
+    mfcc_row <- c(file_name = basename(wav_file), mfcc_row)
+    
+    # Append to the list
+    mfcc_features_list[[i]] <- mfcc_row
+    
+    # Print status
+    cat("Extracted MFCC features for:", wav_file, "\n")
+  }, error = function(e) {
+    # Log the error and continue processing
+    cat("Error processing file:", wav_file, "\nError message:", e$message, "\n")
+  })
+}
+
+# Combine all rows into a data frame
+mfcc_features_df <- do.call(rbind, mfcc_features_list) %>%
+  as.data.frame(stringsAsFactors = FALSE)
+
+# Convert MFCC columns to numeric
+colnames(mfcc_features_df)[-1] <- paste0("MFCC_", seq_len(ncol(mfcc_features_df) - 1)) # Rename columns
+mfcc_features_df[-1] <- lapply(mfcc_features_df[-1], as.numeric)
+
+
+mfcc_features_df <- na.omit(mfcc_features_df)
+```
+adding binary label
+```{r}
+# Define Critical Event as a binary outcome in metadata
+metadata$critical_event <- ifelse(
+  metadata$deaths > 0 | metadata$potential_death == 1, 1, 0
+)
+
+# Ensure that False Alarms are always Non-Critical
+metadata$critical_event <- ifelse(
+  metadata$false_alarm == 1, 0, metadata$critical_event
+)
+
+# Merge metadata with mfcc_features_df on 'file_name' and 'wav' columns
+merged_df <- merge(mfcc_features_df, metadata[, c("wav", "critical_event")], by.x = "file_name", by.y = "wav", all.x = TRUE)
+
+# Check the distribution of Critical vs Non-Critical events in merged_df
+table(merged_df$critical_event)
+
+```
+
+supervised learning 
+```{r}
+# Load necessary libraries
+library(caret)        # For data splitting and model evaluation
+library(smotefamily)  # For SMOTE
+library(randomForest) # Random Forest Model (optional)
+library(pROC)         # For plotting the ROC curve
+
+# Prepare the dataset for SMOTE
+data_for_smote <- merged_df[, -which(names(merged_df) == "file_name")]
+data_for_smote$critical_event <- as.factor(data_for_smote$critical_event)
+
+# Apply SMOTE to balance the classes
+set.seed(123)
+smote_result <- SMOTE(X = data_for_smote[, -which(names(data_for_smote) == "critical_event")], 
+                      target = data_for_smote$critical_event, 
+                      K = 5, dup_size = 6)
+
+# Check the class distribution after SMOTE
+print("Class distribution after SMOTE:")
+print(table(smote_result$target))
+
+# Combine the balanced data
+balanced_data <- smote_result$data
+
+# Split the balanced data into training and test sets (80% train, 20% test)
+trainIndex <- createDataPartition(balanced_data$class, p = 0.8, list = FALSE)
+train_data <- balanced_data[trainIndex, ]
+test_data <- balanced_data[-trainIndex, ]
+
+train_data$class <- as.factor(train_data$class)
+test_data$class <- as.factor(test_data$class)
+
+# Train a logistic regression model
+logistic_model <- glm(class ~ MFCC_1 + MFCC_2 + MFCC_3 + MFCC_4 + MFCC_5 + 
+                       MFCC_6 + MFCC_7 + MFCC_8 + MFCC_9 + MFCC_10 + 
+                       MFCC_11 + MFCC_12 + MFCC_13, 
+                     data = train_data, family = binomial)
+
+# Summary of the logistic regression model
+summary(logistic_model)
+
+# Predict on test data
+predictions <- predict(logistic_model, test_data, type = "response")
+
+# Convert predictions to binary values (0 or 1)
+predictions_binary <- ifelse(predictions > 0.5, 1, 0)
+
+# Evaluate the model with a confusion matrix
+conf_matrix <- confusionMatrix(as.factor(predictions_binary), as.factor(test_data$class))
+print(conf_matrix)
+
+# Plot the ROC curve
+roc_curve <- roc(as.numeric(as.character(test_data$critical_event)), predictions)
+plot(roc_curve, col = "blue", main = "ROC Curve for Logistic Regression")
+
+```
+svm
+```{r}
+library(e1071)
+svm_model <- svm(class ~ ., data = train_data, kernel = "linear")
+predictions_svm <- predict(svm_model, test_data)
+confusionMatrix(predictions_svm, test_data$class)
+```
+Random Forest
+```{r}
+rf_model <- randomForest(class ~ ., data = train_data)
+predictions_rf <- predict(rf_model, test_data)
+confusionMatrix(predictions_rf, test_data$class)
+```
+k-nEAREST nEIGHBORS (KNN)
+```{r}
+library(class)
+knn_model <- knn(train = x_train, test = x_test, cl = y_train, k = 3)
+conf_matrix_knn <- confusionMatrix(as.factor(knn_model), as.factor(y_test))
+print(conf_matrix_knn)
+```
+Decision Trees (CART)
+```{r}
+library(rpart)
+dt_model <- rpart(class ~ ., data = train_data, method = "class")
+dt_predictions <- predict(dt_model, newdata = test_data, type = "class")
+conf_matrix_dt <- confusionMatrix(dt_predictions, test_data$class)
+print(conf_matrix_dt)
+```
+Naive Bayes
+```{r}
+library(e1071)
+nb_model <- naiveBayes(class ~ ., data = train_data)
+nb_predictions <- predict(nb_model, test_data)
+conf_matrix_nb <- confusionMatrix(nb_predictions, test_data$class)
+print(conf_matrix_nb)
+```
+XGBoost
+```{r}
+library(xgboost)
+# Ensure the target variable is numeric (0 or 1)
+train_data$class <- as.numeric(as.factor(train_data$class)) - 1
+test_data$class <- as.numeric(as.factor(test_data$class)) - 1
+
+# Create the XGBoost DMatrix objects
+dtrain <- xgb.DMatrix(data = as.matrix(train_data[, -which(names(train_data) == "class")]), label = train_data$class)
+dtest <- xgb.DMatrix(data = as.matrix(test_data[, -which(names(test_data) == "class")]), label = test_data$class)
+
+# Set the parameters for XGBoost
+param <- list(objective = "binary:logistic", eval_metric = "logloss")
+
+# Train the model
+xgb_model <- xgb.train(params = param, data = dtrain, nrounds = 100)
+
+# Make predictions
+predictions <- predict(xgb_model, dtest)
+
+# Convert predictions to binary (0 or 1)
+predictions_binary <- ifelse(predictions > 0.5, 1, 0)
+
+# Evaluate the model using confusion matrix
+conf_matrix_xgb <- confusionMatrix(as.factor(predictions_binary), as.factor(test_data$class))
+print(conf_matrix_xgb)
+```
+Ada Boost
+```{r}
+library(ada)
+# Assuming you already have your ada_model fitted:
+ada_model <- ada(class ~ ., data = train_data, iter = 50)
+
+# Get predictions (will return a vector of predicted class labels)
+ada_predictions <- predict(ada_model, test_data)
+
+# Since ada_predictions is a vector, we can directly use it in confusionMatrix
+conf_matrix_ada <- confusionMatrix(as.factor(ada_predictions), as.factor(test_data$class))
+
+# Print the confusion matrix
+print(conf_matrix_ada)
+
+```
